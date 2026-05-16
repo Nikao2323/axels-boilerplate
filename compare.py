@@ -1,5 +1,5 @@
 """
-Phase 1 — DWG vs Excel Volume Comparison
+DWG vs Excel Volume Comparison Tool — Phase 2
 გამოყენება: python3 compare.py <dwg_or_dxf_file> <excel_file>
 """
 
@@ -9,38 +9,68 @@ import subprocess
 import tempfile
 import openpyxl
 import ezdxf
-from collections import defaultdict
 
 
 AUTOCAD_WSL = "/mnt/c/Program Files/Autodesk/AutoCAD 2021/accoreconsole.exe"
 
-# Calibrated ratios from 6 reference buildings
-RATIOS = {
-    "karkasi":      {"min": 1.22, "max": 1.28, "label": "კარკასი / სულ ფართი"},
-    "qvabuli_min":  {"ratio": 0.60, "label": "ქვაბული min კოეფ."},
-    "qvabuli_max":  {"ratio": 0.85, "label": "ქვაბული max კოეფ."},
-}
-TOLERANCE_AREA_PCT = 8   # % floor area match tolerance DXF vs Excel
-TOLERANCE_RATIO_PCT = 10  # % tolerance for ratio-based checks
+# Calibrated from 6 reference buildings (სახლი 6,8,9,11,12,13)
+RATIO_CHECKS = [
+    {
+        "key":      "rkinabetonis karkasi",
+        "unit":     "m2",
+        "label":    "კარკასი",
+        "min":      1.22,
+        "max":      1.27,
+        "tol":      0.05,    # ±5% extra tolerance
+        "warn_only": False,
+    },
+    {
+        "key":      "betoni b-25",
+        "unit":     "m3",
+        "label":    "ბეტონი B-25",
+        "min":      0.276,
+        "max":      0.315,
+        "tol":      0.05,
+        "warn_only": False,
+    },
+    {
+        "key":      "armatura a500",
+        "unit":     "t",
+        "label":    "არმატ. A500",
+        "min":      0.035,
+        "max":      0.042,
+        "tol":      0.05,
+        "warn_only": False,
+    },
+    {
+        "key":      "qvabulis amoReba",
+        "unit":     "m3",
+        "label":    "ქვაბ. ამოღება",
+        "min":      0.62,
+        "max":      0.82,
+        "tol":      0.08,    # wider — more variable
+        "warn_only": True,   # only warning, not failure
+    },
+]
+
+TOLERANCE_AREA_PCT = 8   # % floor area match tolerance (DXF vs Excel)
 
 
-# ── DWG → DXF ────────────────────────────────────────────────────────────────
+# ── DWG → DXF conversion ─────────────────────────────────────────────────────
 
 def dwg_to_dxf(dwg_path: str) -> str:
-    ext = os.path.splitext(dwg_path)[1].lower()
-    if ext == ".dxf":
+    if dwg_path.lower().endswith(".dxf"):
         return dwg_path
 
-    # Build Windows paths
     def to_win(p):
         if p.startswith("/mnt/"):
             drive = p[5].upper()
             return drive + ":\\" + p[7:].replace("/", "\\")
         return p
 
-    dwg_win = to_win(dwg_path)
-    dxf_tmp = tempfile.mktemp(suffix=".dxf", dir="/tmp")
-    dxf_win = "C:\\Users\\Nika\\AppData\\Local\\Temp\\" + os.path.basename(dxf_tmp)
+    dwg_win  = to_win(dwg_path)
+    dxf_tmp  = tempfile.mktemp(suffix=".dxf", dir="/tmp")
+    dxf_win  = "C:\\Users\\Nika\\AppData\\Local\\Temp\\" + os.path.basename(dxf_tmp)
 
     scr = tempfile.NamedTemporaryFile(
         suffix=".scr", mode="w", dir="/tmp", delete=False, encoding="utf-8"
@@ -51,45 +81,38 @@ def dwg_to_dxf(dwg_path: str) -> str:
 
     subprocess.run(
         [AUTOCAD_WSL, "/i", dwg_win, "/s", scr_win, "/l", "en-US"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=120,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
     )
     os.unlink(scr.name)
 
-    # accoreconsole writes to Windows temp, find it in WSL
     wsl_path = "/mnt/c/Users/Nika/AppData/Local/Temp/" + os.path.basename(dxf_tmp)
-    if os.path.exists(wsl_path):
-        return wsl_path
-    if os.path.exists(dxf_tmp):
-        return dxf_tmp
-    raise FileNotFoundError(f"DXF conversion failed for: {dwg_path}")
+    for candidate in (wsl_path, dxf_tmp):
+        if os.path.exists(candidate):
+            return candidate
+    raise FileNotFoundError(f"DXF conversion failed: {dwg_path}")
 
 
-# ── DXF extraction ───────────────────────────────────────────────────────────
+# ── DXF geometry extraction ───────────────────────────────────────────────────
 
-def polygon_area(pts):
+def _poly_area(pts):
     x = [p[0] for p in pts]
     y = [p[1] for p in pts]
     n = len(x)
-    return abs(sum(x[i] * y[(i+1)%n] - x[(i+1)%n] * y[i] for i in range(n))) / 2
+    return abs(sum(x[i]*y[(i+1)%n] - x[(i+1)%n]*y[i] for i in range(n))) / 2
 
 
 def extract_floor_polygons(dxf_path: str, min_area=200, max_area=3000):
-    """Return sorted list of distinct closed-polygon areas (m²) in building range."""
+    """Return clustered floor-polygon list: [{area, count}, ...]  (m², descending)."""
     doc = ezdxf.readfile(dxf_path)
-    msp = doc.modelspace()
-
     raw = []
-    for ent in msp:
+    for ent in doc.modelspace():
         if ent.dxftype() == "LWPOLYLINE" and ent.is_closed:
             pts = list(ent.vertices())
             if len(pts) >= 4:
-                area = polygon_area(pts)
-                if min_area < area < max_area:
-                    raw.append(round(area, 1))
+                a = _poly_area(pts)
+                if min_area < a < max_area:
+                    raw.append(round(a, 1))
 
-    # Cluster areas within 2m² of each other → pick median
     raw.sort()
     clusters = []
     for a in raw:
@@ -98,180 +121,189 @@ def extract_floor_polygons(dxf_path: str, min_area=200, max_area=3000):
         else:
             clusters.append([a])
 
-    # Return unique cluster representatives with count
     result = []
     for c in clusters:
-        rep = sorted(c)[len(c)//2]   # median
+        rep = sorted(c)[len(c) // 2]
         result.append({"area": rep, "count": len(c)})
     return sorted(result, key=lambda x: -x["area"])
 
 
-# ── Excel extraction ─────────────────────────────────────────────────────────
+# ── Excel extraction ──────────────────────────────────────────────────────────
 
-def extract_excel_floors(xlsx_path: str):
+def extract_excel_floors(xlsx_path: str) -> dict:
     """Return {label: area_m2} from ფართები sheet."""
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     if "ფართები" not in wb.sheetnames:
         return {}
-    ws = wb["ფართები"]
     floors = {}
-    for row in ws.iter_rows(min_row=4, values_only=True):
+    for row in wb["ფართები"].iter_rows(min_row=4, values_only=True):
         if len(row) < 3:
             continue
-        idx, floor, total = row[0], row[1], row[2]
+        _, floor, total = row[0], row[1], row[2]
         if not (floor and isinstance(total, (int, float)) and total > 0):
             continue
-        label = str(floor)
-        if "jami" in label.lower():
+        s = str(floor)
+        if "jami" in s.lower():
             floors["სულ"] = float(total)
-        elif "Zirk" in label or "zirk" in label:
+        elif "Zirk" in s or "zirk" in s:
             floors["საძირკველი"] = float(total)
-        elif "xuravi" in label or "saxuravi" in label:
+        elif "xuravi" in s or "saxuravi" in s:
             floors["სახურავი"] = float(total)
         elif isinstance(floor, (int, float)):
             floors[f"სართ.{int(floor)}"] = float(total)
     return floors
 
 
-def extract_excel_budget(xlsx_path: str):
-    """Return list of {desc, unit, qty} from ბიუჯეტი sheet."""
+def extract_excel_budget(xlsx_path: str) -> list:
+    """Return [{desc, unit, qty}] from ბიუჯეტი sheet (qty > 10, ASCII units only)."""
     wb = openpyxl.load_workbook(xlsx_path, data_only=True)
     if "ბიუჯეტი" not in wb.sheetnames:
         return []
-    ws = wb["ბიუჯეტი"]
     items = []
-    header_found = False
-    for row in ws.iter_rows(min_row=1, values_only=True):
-        if not header_found:
+    header = False
+    for row in wb["ბიუჯეტი"].iter_rows(min_row=1, values_only=True):
+        if not header:
             if row[1] == "samuSaos dasaxeleba" or row[0] == "#":
-                header_found = True
+                header = True
             continue
         desc, unit, qty = row[1], row[2], row[3]
-        if isinstance(desc, str) and isinstance(qty, (int, float)) and qty > 0:
-            items.append({"desc": desc, "unit": str(unit or ""), "qty": float(qty)})
+        if (isinstance(desc, str)
+                and isinstance(qty, (int, float))
+                and qty > 10
+                and isinstance(unit, str)
+                and unit in ("m2", "m3", "t")):
+            items.append({"desc": desc, "unit": unit, "qty": float(qty)})
     return items
 
 
-# ── Comparison logic ─────────────────────────────────────────────────────────
+# ── Matching helpers ──────────────────────────────────────────────────────────
 
-def match_floor(excel_area, dxf_polygons, tol_pct=TOLERANCE_AREA_PCT):
-    """Find best matching DXF polygon for an Excel floor area."""
-    best = None
-    best_diff = 1e9
-    for p in dxf_polygons:
-        diff = abs(p["area"] - excel_area)
-        if diff < best_diff:
-            best_diff = diff
-            best = p
-    if best is None:
+def _best_polygon(excel_area, dxf_polys):
+    if not dxf_polys:
         return None, None, None
+    best = min(dxf_polys, key=lambda p: abs(p["area"] - excel_area))
     diff_pct = (best["area"] - excel_area) / excel_area * 100
-    ok = abs(diff_pct) <= tol_pct
+    ok = abs(diff_pct) <= TOLERANCE_AREA_PCT
     return best["area"], diff_pct, ok
 
 
-def check_ratio(qty, total_area, ratio_min, ratio_max):
-    if not total_area:
-        return None
-    expected_min = total_area * ratio_min
-    expected_max = total_area * ratio_max
-    ok = expected_min * 0.9 <= qty <= expected_max * 1.1
-    return {"expected_min": expected_min, "expected_max": expected_max, "ok": ok}
+def _find_budget_item(key, unit, budget):
+    """Return the first matching budget item with given key substring and unit."""
+    key_lower = key.lower()
+    for item in budget:
+        if key_lower in item["desc"].lower() and item["unit"] == unit:
+            return item
+    return None
 
 
-# ── Main report ──────────────────────────────────────────────────────────────
+def _ratio_status(qty, total, r):
+    lo  = total * r["min"] * (1 - r["tol"])
+    hi  = total * r["max"] * (1 + r["tol"])
+    exp = f"{total*r['min']:.0f}–{total*r['max']:.0f}"
+    if lo <= qty <= hi:
+        return True, f"✓  ({exp} {r['unit']})"
+    else:
+        tag = "⚠" if r["warn_only"] else "✗"
+        return r["warn_only"], f"{tag} მოსალოდნელი {exp} {r['unit']}, მიღებული {qty:.1f}"
+
+
+# ── Main report ───────────────────────────────────────────────────────────────
 
 def compare(dwg_path: str, xlsx_path: str):
-    name = os.path.splitext(os.path.basename(dwg_path))[0]
-    print(f"\n{'='*65}")
-    print(f"  შედარება: {name}")
-    print(f"  DWG:   {os.path.basename(dwg_path)}")
+    print(f"\n{'='*68}")
+    print(f"  DWG  : {os.path.basename(dwg_path)}")
     print(f"  Excel: {os.path.basename(xlsx_path)}")
-    print("="*65)
+    print("="*68)
 
-    # Convert DWG
-    print("\n[1] DWG → DXF...")
+    print("\n▶ DWG → DXF კონვერტაცია...")
     dxf_path = dwg_to_dxf(dwg_path)
-    print(f"    OK: {os.path.basename(dxf_path)}")
+    print(f"  OK: {os.path.basename(dxf_path)}")
 
-    # Extract
-    dxf_polys = extract_floor_polygons(dxf_path)
+    dxf_polys  = extract_floor_polygons(dxf_path)
     xl_floors  = extract_excel_floors(xlsx_path)
     xl_budget  = extract_excel_budget(xlsx_path)
+    total_xl   = xl_floors.get("სულ")
 
-    total_excel = xl_floors.get("სულ")
+    failures = []
+    warnings = []
 
-    # ── Section A: Floor areas ────────────────────────────────────────────
-    print("\n[A] სართულების ფართები — Excel vs DWG")
-    print(f"  {'სართული':<15} {'Excel m²':>10}  {'DXF m²':>10}  {'სხვაობა':>9}  სტატ.")
-    print("  " + "-"*58)
-    all_ok = True
-    for label, excel_area in sorted(xl_floors.items(), key=lambda x: -x[1]):
+    # ── A: Floor areas ────────────────────────────────────────────────────
+    print("\n── A. სართულების ფართი (Excel ფართები vs DWG polygons) " + "─"*15)
+    print(f"  {'სართული':<14} {'Excel':>8}  {'DWG':>8}  {'სხვაობა':>8}  სტატ.")
+    print("  " + "─"*55)
+
+    dxf_sum = 0
+    for label, ea in sorted(xl_floors.items(), key=lambda x: -x[1]):
         if label == "სულ":
             continue
-        dxf_area, diff_pct, ok = match_floor(excel_area, dxf_polys)
-        status = "✓" if ok else "✗ განსხვავება!"
+        da, dp, ok = _best_polygon(ea, dxf_polys)
+        da_s  = f"{da:.1f}" if da else "—"
+        dp_s  = f"{dp:+.1f}%" if dp is not None else "—"
+        tag   = "✓" if ok else "✗"
+        print(f"  {label:<14} {ea:>8.1f}  {da_s:>8}  {dp_s:>8}  {tag}")
+        if da:
+            dxf_sum += da
         if not ok:
-            all_ok = False
-        dxf_str = f"{dxf_area:.1f}" if dxf_area else "—"
-        diff_str = f"{diff_pct:+.1f}%" if diff_pct is not None else "—"
-        print(f"  {label:<15} {excel_area:>10.1f}  {dxf_str:>10}  {diff_str:>9}  {status}")
+            failures.append(f"სართ. {label}: Excel {ea:.1f} vs DWG {da_s} ({dp_s})")
 
-    if total_excel:
-        # Sum one matched DXF area per Excel floor (not count × area)
-        dxf_matched_sum = 0
-        for label, excel_area in xl_floors.items():
-            if label == "სულ":
+    if total_xl:
+        dp = (dxf_sum - total_xl) / total_xl * 100
+        ok = abs(dp) <= 10
+        tag = "✓" if ok else "✗"
+        print(f"  {'სულ':<14} {total_xl:>8.1f}  {dxf_sum:>8.1f}  {dp:>+7.1f}%  {tag}")
+        if not ok:
+            failures.append(f"სულ ფართი: Excel {total_xl:.1f} vs DWG {dxf_sum:.1f} ({dp:+.1f}%)")
+
+    # ── B: Budget volume ratios ───────────────────────────────────────────
+    print("\n── B. ბიუჯეტის მოცულობები (raod. სვეტი vs ratio check) " + "─"*14)
+    print(f"  {'პუნქტი':<20} {'ერთ.':>4} {'Excel raod.':>12}  შედეგი")
+    print("  " + "─"*68)
+
+    if not total_xl:
+        print("  ⚠ სულ ფართი ვერ მოიძებნა — ratio check შეუძლებელია")
+    else:
+        for r in RATIO_CHECKS:
+            item = _find_budget_item(r["key"], r["unit"], xl_budget)
+            if item is None:
+                print(f"  {r['label']:<20} {r['unit']:>4} {'—':>12}  ⚠ ვერ მოიძებნა")
                 continue
-            dxf_area, _, _ = match_floor(excel_area, dxf_polys)
-            if dxf_area:
-                dxf_matched_sum += dxf_area
-        diff_pct = (dxf_matched_sum - total_excel) / total_excel * 100
-        ok = abs(diff_pct) <= 10
-        status = "✓" if ok else "✗ განსხვავება!"
-        print(f"  {'სულ (ჯამი)':<15} {total_excel:>10.1f}  {dxf_matched_sum:>10.1f}  {diff_pct:+.1f}%  {status}")
-        if not ok:
-            all_ok = False
+            qty  = item["qty"]
+            ok, msg = _ratio_status(qty, total_xl, r)
+            print(f"  {r['label']:<20} {r['unit']:>4} {qty:>12.2f}  {msg}")
+            if not ok:
+                if r["warn_only"]:
+                    warnings.append(f"{r['label']}: {msg}")
+                else:
+                    failures.append(f"{r['label']}: {msg}")
 
-    # ── Section B: Key budget quantities ─────────────────────────────────
-    print("\n[B] ბიუჯეტის მოცულობები — raod. სვეტი")
-    print(f"  {'სამუშაო':<42} {'ერთ.':>5} {'raod.':>10}  სტატ.")
-    print("  " + "-"*65)
-
-    key_items = [
-        ("karkasi",   "კარკასი"),
-        ("qvabulis mowyoba", "ქვაბ. მოწყობა"),
-        ("qvabulis amoReba", "ქვაბ. ამოღება"),
-        ("betoni b-25", "ბეტონი B25"),
-        ("armatura a500", "არმატ. A500"),
-        ("inertuli", "ინერტული"),
-        ("hidroizolacia", "ჰიდრ-ია"),
-    ]
-    for key, display in key_items:
-        for item in xl_budget:
-            if key in item["desc"].lower():
-                qty  = item["qty"]
-                unit = item["unit"]
-                status = "–"
-                # Ratio check for karkasi
-                if "karkasi" in key and total_excel:
-                    r = check_ratio(qty, total_excel, RATIOS["karkasi"]["min"], RATIOS["karkasi"]["max"])
-                    if r:
-                        status = "✓" if r["ok"] else f"✗ მოსალოდნელი {r['expected_min']:.0f}–{r['expected_max']:.0f}"
-                print(f"  {display:<42} {unit:>5} {qty:>10.2f}  {status}")
-                break
+    # ── C: All budget items table ─────────────────────────────────────────
+    print("\n── C. ბიუჯეტის სრული სია (m2/m3/t > 10) " + "─"*27)
+    print(f"  {'სამუშაო':<46} {'ერთ.':>4} {'raod.':>12}")
+    print("  " + "─"*65)
+    for item in xl_budget:
+        print(f"  {item['desc'][:46]:<46} {item['unit']:>4} {item['qty']:>12.2f}")
 
     # ── Summary ───────────────────────────────────────────────────────────
-    print("\n" + "="*65)
-    if all_ok:
-        print("  ᲨᲔᲓᲔᲒᲘ: ✓ ყველა სართულის ფართი Excel-DWG-ს ემთხვევა")
+    print("\n" + "="*68)
+    if not failures and not warnings:
+        print("  ᲨᲔᲓᲔᲒᲘ: ✓ ყველა შემოწმება გაიარა — ბიუჯეტი DWG-ს ემთხვევა")
     else:
-        print("  ᲨᲔᲓᲔᲒᲘ: ✗ განსხვავებები აღმოჩენილია — შეამოწმე ზემოთ!")
-    print("="*65 + "\n")
+        if failures:
+            print("  ᲨᲔᲓᲔᲒᲘ: ✗ პრობლემები:")
+            for f in failures:
+                print(f"    • {f}")
+        if warnings:
+            print("  გაფრთხილება:")
+            for w in warnings:
+                print(f"    ⚠ {w}")
+    print("="*68 + "\n")
+
+    return len(failures) == 0
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("გამოყენება: python3 compare.py <dwg_ან_dxf> <excel.xlsx>")
         sys.exit(1)
-    compare(sys.argv[1], sys.argv[2])
+    ok = compare(sys.argv[1], sys.argv[2])
+    sys.exit(0 if ok else 1)
