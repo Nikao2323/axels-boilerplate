@@ -12,7 +12,10 @@ import openpyxl
 import ezdxf
 
 
-AUTOCAD_WSL = "/mnt/c/Program Files/Autodesk/AutoCAD 2021/accoreconsole.exe"
+AUTOCAD_WSL = os.environ.get(
+    "ARSI_AUTOCAD_EXE",
+    "/mnt/c/Program Files/Autodesk/AutoCAD 2021/accoreconsole.exe",
+)
 
 # Calibrated from 6 reference buildings (სახლი 6,8,9,11,12,13)
 RATIO_CHECKS = [
