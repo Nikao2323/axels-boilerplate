@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DWG vs Excel შემოწმება</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Segoe UI", "Calibri", sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%);
+      padding: 28px 40px;
+      border-bottom: 1px solid #2d4a6e;
+    }
+    header h1 { font-size: 1.6rem; font-weight: 700; color: #fff; }
+    header p  { font-size: .85rem; color: #94a3b8; margin-top: 4px; }
+
+    /* ── Main layout ─────────────────────────────────────────────── */
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 36px 24px;
+    }
+
+    /* ── Upload card ─────────────────────────────────────────────── */
+    .upload-card {
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 32px;
+    }
+    .upload-card h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #90cdf4;
+      margin-bottom: 24px;
+    }
+
+    .file-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 600px) { .file-grid { grid-template-columns: 1fr; } }
+
+    .drop-zone {
+      border: 2px dashed #4a6fa5;
+      border-radius: 10px;
+      padding: 28px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: #63b3ed;
+      background: #1e2d45;
+    }
+    .drop-zone.has-file {
+      border-color: #48bb78;
+      background: #1a2e22;
+    }
+    .drop-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .drop-icon { font-size: 2rem; margin-bottom: 8px; }
+    .drop-label { font-size: .8rem; font-weight: 600; color: #90cdf4; margin-bottom: 4px; }
+    .drop-hint  { font-size: .72rem; color: #718096; }
+    .drop-filename {
+      font-size: .78rem; color: #68d391; margin-top: 8px;
+      word-break: break-all; display: none;
+    }
+    .drop-zone.has-file .drop-filename { display: block; }
+    .drop-zone.has-file .drop-hint     { display: none; }
+
+    .btn-check {
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #2b6cb0, #1a4a7e);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      letter-spacing: .5px;
+    }
+    .btn-check:hover    { opacity: .9; transform: translateY(-1px); }
+    .btn-check:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    /* ── Progress ────────────────────────────────────────────────── */
+    #progress {
+      display: none;
+      text-align: center;
+      padding: 24px;
+      color: #90cdf4;
+    }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #2d4a6e;
+      border-top-color: #63b3ed;
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Results ─────────────────────────────────────────────────── */
+    #results { display: none; }
+
+    .verdict {
+      border-radius: 12px;
+      padding: 24px 32px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .verdict.ok   { background: #1c3d28; border: 1px solid #276221; }
+    .verdict.fail { background: #3d1c1c; border: 1px solid #9b2020; }
+    .verdict-icon { font-size: 2.8rem; }
+    .verdict-title{ font-size: 1.4rem; font-weight: 700; }
+    .verdict.ok   .verdict-title { color: #68d391; }
+    .verdict.fail .verdict-title { color: #fc8181; }
+    .verdict-sub  { font-size: .85rem; color: #a0aec0; margin-top: 4px; }
+
+    /* ── Sections ────────────────────────────────────────────────── */
+    .section {
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 10px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+    .section-header {
+      background: #1e3a5f;
+      padding: 12px 20px;
+      font-weight: 700;
+      font-size: .9rem;
+      color: #90cdf4;
+      border-bottom: 1px solid #2d4a6e;
+    }
+
+    /* ── Tables ──────────────────────────────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+    th {
+      background: #1a2d45;
+      padding: 9px 14px;
+      text-align: left;
+      font-weight: 600;
+      color: #90cdf4;
+      border-bottom: 1px solid #2d4a6e;
+    }
+    td {
+      padding: 9px 14px;
+      border-bottom: 1px solid #1e2736;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr.total-row td  { font-weight: 700; background: #1c2840; }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: .75rem;
+      font-weight: 700;
+    }
+    .tag-ok   { background: #1c3d28; color: #68d391; }
+    .tag-warn { background: #3d3200; color: #f6e05e; }
+    .tag-fail { background: #3d1c1c; color: #fc8181; }
+    .tag-na   { background: #2d3748; color: #718096; }
+
+    .diff-ok   { color: #68d391; }
+    .diff-warn { color: #f6e05e; }
+    .diff-fail { color: #fc8181; }
+
+    /* ── Budget table collapsible ────────────────────────────────── */
+    .toggle-btn {
+      background: none; border: none; color: #63b3ed;
+      font-size: .8rem; cursor: pointer; padding: 12px 20px;
+      display: block; text-align: left; width: 100%;
+    }
+    .toggle-btn:hover { color: #90cdf4; }
+    #budget-body { display: none; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📐 DWG vs Excel შემოწმება</h1>
+  <p>ატვირთე არქიტექტურული ნახაზი და ბიუჯეტი — გეტყვი შეესაბამება თუ არა</p>
+</header>
+
+<main>
+
+  <!-- Upload form -->
+  <div class="upload-card">
+    <h2>ფაილების ატვირთვა</h2>
+    <form id="upload-form">
+      <div class="file-grid">
+        <div class="drop-zone" id="dz-dwg">
+          <input type="file" id="input-dwg" accept=".dwg,.dxf" required>
+          <div class="drop-icon">📁</div>
+          <div class="drop-label">DWG / DXF ფაილი</div>
+          <div class="drop-hint">AutoCAD არქიტექტურული ნახაზი</div>
+          <div class="drop-filename" id="fn-dwg"></div>
+        </div>
+        <div class="drop-zone" id="dz-xl">
+          <input type="file" id="input-xl" accept=".xlsx,.xls" required>
+          <div class="drop-icon">📊</div>
+          <div class="drop-label">Excel ბიუჯეტი</div>
+          <div class="drop-hint">.xlsx ფაილი ფართებით და ბიუჯეტით</div>
+          <div class="drop-filename" id="fn-xl"></div>
+        </div>
+      </div>
+      <button class="btn-check" type="submit" id="btn-submit">
+        🔍 შემოწმება
+      </button>
+    </form>
+  </div>
+
+  <!-- Progress -->
+  <div id="progress">
+    <div class="spinner"></div>
+    <div id="progress-text">DWG ანალიზი მიმდინარეობს...</div>
+  </div>
+
+  <!-- Results -->
+  <div id="results">
+
+    <!-- Verdict -->
+    <div class="verdict" id="verdict">
+      <div class="verdict-icon" id="verdict-icon"></div>
+      <div>
+        <div class="verdict-title" id="verdict-title"></div>
+        <div class="verdict-sub"  id="verdict-sub"></div>
+      </div>
+    </div>
+
+    <!-- A: Floor areas -->
+    <div class="section">
+      <div class="section-header">A. სართულების ფართები — Excel vs DWG</div>
+      <table>
+        <thead>
+          <tr>
+            <th>სართული</th>
+            <th>Excel m²</th>
+            <th>DWG m²</th>
+            <th>სხვაობა</th>
+            <th>სტატ.</th>
+          </tr>
+        </thead>
+        <tbody id="floors-body"></tbody>
+      </table>
+    </div>
+
+    <!-- B: Ratio checks -->
+    <div class="section">
+      <div class="section-header">B. ბიუჯეტის მოცულობები — raod. სვეტი</div>
+      <table>
+        <thead>
+          <tr>
+            <th>პუნქტი</th>
+            <th>ერთ.</th>
+            <th>Excel raod.</th>
+            <th>მოსალოდ. დიაპ.</th>
+            <th>სტატ.</th>
+          </tr>
+        </thead>
+        <tbody id="ratios-body"></tbody>
+      </table>
+    </div>
+
+    <!-- C: Full budget -->
+    <div class="section">
+      <button class="toggle-btn" onclick="toggleBudget()">
+        ▶ C. სრული ბიუჯეტის სია (დააჭირე გასახსნელად)
+      </button>
+      <div id="budget-body">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:60%">სამუშაო</th>
+              <th>ერთ.</th>
+              <th>raod.</th>
+            </tr>
+          </thead>
+          <tbody id="budget-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /results -->
+</main>
+
+<script>
+// ── File drop zones ──────────────────────────────────────────────────────────
+function setupDropZone(zoneId, inputId, fnId) {
+  const zone  = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  const fn    = document.getElementById(fnId);
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) {
+      fn.textContent = '✓ ' + input.files[0].name;
+      zone.classList.add('has-file');
+    }
+  });
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const dt = e.dataTransfer;
+    if (dt.files[0]) {
+      const transfer = new DataTransfer();
+      transfer.items.add(dt.files[0]);
+      input.files = transfer.files;
+      fn.textContent = '✓ ' + dt.files[0].name;
+      zone.classList.add('has-file');
+    }
+  });
+}
+setupDropZone('dz-dwg', 'input-dwg', 'fn-dwg');
+setupDropZone('dz-xl',  'input-xl',  'fn-xl');
+
+// ── Form submit ──────────────────────────────────────────────────────────────
+document.getElementById('upload-form').addEventListener('submit', async e => {
+  e.preventDefault();
+
+  const btn   = document.getElementById('btn-submit');
+  const prog  = document.getElementById('progress');
+  const res   = document.getElementById('results');
+  const ptxt  = document.getElementById('progress-text');
+
+  btn.disabled = true;
+  res.style.display  = 'none';
+  prog.style.display = 'block';
+
+  const steps = [
+    'DWG ფაილი იტვირთება...',
+    'DWG → DXF კონვერტაცია...',
+    'სართულების ანალიზი...',
+    'ბიუჯეტის შედარება...',
+    'ანგარიში მზადდება...',
+  ];
+  let si = 0;
+  const stepTimer = setInterval(() => {
+    if (si < steps.length - 1) ptxt.textContent = steps[++si];
+  }, 3000);
+
+  const fd = new FormData();
+  fd.append('dwg',   document.getElementById('input-dwg').files[0]);
+  fd.append('excel', document.getElementById('input-xl').files[0]);
+
+  try {
+    const resp = await fetch('/compare', { method: 'POST', body: fd });
+    clearInterval(stepTimer);
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || 'სერვერის შეცდომა');
+    }
+    const data = await resp.json();
+    renderResults(data);
+  } catch (err) {
+    clearInterval(stepTimer);
+    prog.style.display = 'none';
+    btn.disabled = false;
+    alert('შეცდომა: ' + err.message);
+  }
+});
+
+// ── Render results ───────────────────────────────────────────────────────────
+function renderResults(data) {
+  document.getElementById('progress').style.display = 'none';
+  document.getElementById('btn-submit').disabled = false;
+
+  // Verdict
+  const v = document.getElementById('verdict');
+  v.className = 'verdict ' + (data.ok ? 'ok' : 'fail');
+  document.getElementById('verdict-icon').textContent  = data.ok ? '✅' : '❌';
+  document.getElementById('verdict-title').textContent =
+    data.ok ? 'ბიუჯეტი DWG-ს ემთხვევა' : 'განსხვავებები აღმოჩენილია';
+  document.getElementById('verdict-sub').textContent =
+    `სულ ფართი Excel: ${fmt(data.total_excel)} m²  |  DWG: ${fmt(data.total_dwg)} m²`;
+
+  // A: Floors
+  const fb = document.getElementById('floors-body');
+  fb.innerHTML = '';
+  for (const f of data.floors) {
+    const diffStr = f.diff_pct != null ? (f.diff_pct > 0 ? '+' : '') + f.diff_pct + '%' : '—';
+    const diffCls = Math.abs(f.diff_pct||0) <= 8 ? 'diff-ok' : 'diff-fail';
+    const tag     = tagHtml(f.ok, false);
+    const isTotal = f.is_total;
+    fb.insertAdjacentHTML('beforeend', `
+      <tr class="${isTotal ? 'total-row' : ''}">
+        <td>${f.label}</td>
+        <td>${fmt(f.excel)}</td>
+        <td>${f.dwg != null ? fmt(f.dwg) : '—'}</td>
+        <td class="${diffCls}">${diffStr}</td>
+        <td>${tag}</td>
+      </tr>`);
+  }
+
+  // B: Ratios
+  const rb = document.getElementById('ratios-body');
+  rb.innerHTML = '';
+  for (const r of data.ratios) {
+    const expStr = r.exp_min != null
+      ? `${fmt(r.exp_min)} – ${fmt(r.exp_max)} ${r.unit}`
+      : '—';
+    const tag = tagHtml(r.ok, r.warn_only);
+    rb.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td><strong>${r.label}</strong></td>
+        <td>${r.unit}</td>
+        <td>${r.qty != null ? fmt(r.qty) : '—'}</td>
+        <td style="color:#94a3b8;font-size:.78rem">${expStr}</td>
+        <td>${tag}</td>
+      </tr>`);
+  }
+
+  // C: Budget
+  const bt = document.getElementById('budget-table');
+  bt.innerHTML = '';
+  for (const item of data.budget) {
+    bt.insertAdjacentHTML('beforeend', `
+      <tr>
+        <td>${item.desc}</td>
+        <td>${item.unit}</td>
+        <td>${fmt(item.qty)}</td>
+      </tr>`);
+  }
+
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
+}
+
+function tagHtml(ok, warnOnly) {
+  if (ok === null || ok === undefined) return `<span class="tag tag-na">—</span>`;
+  if (ok)    return `<span class="tag tag-ok">✓ OK</span>`;
+  if (warnOnly) return `<span class="tag tag-warn">⚠ გაფრთხ.</span>`;
+  return `<span class="tag tag-fail">✗ შეამოწმე</span>`;
+}
+
+function fmt(v) {
+  if (v == null) return '—';
+  return Number(v).toLocaleString('ka-GE', { maximumFractionDigits: 1 });
+}
+
+function toggleBudget() {
+  const body = document.getElementById('budget-body');
+  const btn  = document.querySelector('.toggle-btn');
+  const open = body.style.display === 'block';
+  body.style.display = open ? 'none' : 'block';
+  btn.textContent    = (open ? '▶' : '▼') + ' C. სრული ბიუჯეტის სია (დააჭირე ' + (open ? 'გასახსნელად' : 'დასახურავად') + ')';
+}
+</script>
+</body>
+</html>
