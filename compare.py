@@ -5,6 +5,7 @@ DWG vs Excel Volume Comparison Tool — Phase 2
 
 import sys
 import os
+import shutil
 import subprocess
 import tempfile
 import openpyxl
@@ -62,34 +63,43 @@ def dwg_to_dxf(dwg_path: str) -> str:
     if dwg_path.lower().endswith(".dxf"):
         return dwg_path
 
-    def to_win(p):
-        if p.startswith("/mnt/"):
-            drive = p[5].upper()
-            return drive + ":\\" + p[7:].replace("/", "\\")
-        return p
+    # Fixed Windows-accessible staging paths (no deep temp subdirs)
+    WIN_TEMP_WSL = "/mnt/c/Users/Nika/AppData/Local/Temp"
 
-    dwg_win  = to_win(dwg_path)
-    dxf_tmp  = tempfile.mktemp(suffix=".dxf", dir="/tmp")
-    dxf_win  = "C:\\Users\\Nika\\AppData\\Local\\Temp\\" + os.path.basename(dxf_tmp)
+    staged_dwg_wsl = f"{WIN_TEMP_WSL}/staged_input.dwg"
+    staged_dxf_wsl = f"{WIN_TEMP_WSL}/staged_output.dxf"
+    staged_dwg_win = "C:\\Users\\Nika\\AppData\\Local\\Temp\\staged_input.dwg"
+    staged_dxf_win = "C:\\Users\\Nika\\AppData\\Local\\Temp\\staged_output.dxf"
+    scr_wsl        = f"{WIN_TEMP_WSL}/staged_convert.scr"
+    scr_win        = "C:\\Users\\Nika\\AppData\\Local\\Temp\\staged_convert.scr"
 
-    scr = tempfile.NamedTemporaryFile(
-        suffix=".scr", mode="w", dir="/tmp", delete=False, encoding="utf-8"
+    # Copy input DWG to known Windows-accessible path
+    shutil.copy2(dwg_path, staged_dwg_wsl)
+
+    # Remove stale output
+    if os.path.exists(staged_dxf_wsl):
+        os.remove(staged_dxf_wsl)
+
+    # Write AutoCAD script
+    with open(scr_wsl, "w", encoding="utf-8") as f:
+        f.write(f"DXFOUT\n{staged_dxf_win}\n16\n\n")
+
+    # Launch accoreconsole and poll for output file (don't rely on process exit)
+    proc = subprocess.Popen(
+        [AUTOCAD_WSL, "/i", staged_dwg_win, "/s", scr_win, "/l", "en-US"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
-    scr.write(f"DXFOUT\n{dxf_win}\n16\n\n")
-    scr.close()
-    scr_win = "C:\\Users\\Nika\\AppData\\Local\\Temp\\" + os.path.basename(scr.name)
+    import time
+    deadline = time.time() + 300  # 5 min max
+    while time.time() < deadline:
+        if os.path.exists(staged_dxf_wsl) and os.path.getsize(staged_dxf_wsl) > 1000:
+            time.sleep(1)  # let AutoCAD finish writing
+            proc.terminate()
+            return staged_dxf_wsl
+        time.sleep(2)
 
-    subprocess.run(
-        [AUTOCAD_WSL, "/i", dwg_win, "/s", scr_win, "/l", "en-US"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
-    )
-    os.unlink(scr.name)
-
-    wsl_path = "/mnt/c/Users/Nika/AppData/Local/Temp/" + os.path.basename(dxf_tmp)
-    for candidate in (wsl_path, dxf_tmp):
-        if os.path.exists(candidate):
-            return candidate
-    raise FileNotFoundError(f"DXF conversion failed: {dwg_path}")
+    proc.terminate()
+    raise FileNotFoundError(f"DXF conversion timed out: {dwg_path}")
 
 
 # ── DXF geometry extraction ───────────────────────────────────────────────────

@@ -26,8 +26,9 @@ from compare import (
     TOLERANCE_AREA_PCT,
 )
 
-UPLOAD_DIR = Path(__file__).parent / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Windows-accessible temp dir (AutoCAD needs Windows paths)
+UPLOAD_DIR = Path("/mnt/c/Users/Nika/AppData/Local/Temp/dwg_uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="DWG vs Excel Checker")
 app.mount("/static", StaticFiles(directory="static"), name="static")
