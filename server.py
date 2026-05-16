@@ -26,8 +26,11 @@ from compare import (
     TOLERANCE_AREA_PCT,
 )
 
-# Windows-accessible temp dir (AutoCAD needs Windows paths)
-UPLOAD_DIR = Path("/mnt/c/Users/Nika/AppData/Local/Temp/dwg_uploads")
+# Upload staging dir. Default = OS temp dir (works on any machine).
+# On Nika's WSL+AutoCAD setup, override with ARSI_UPLOAD_DIR pointing to a
+# Windows-accessible path (e.g. /mnt/c/Users/Nika/AppData/Local/Temp/dwg_uploads)
+# — AutoCAD needs Windows paths to read the staged uploads.
+UPLOAD_DIR = Path(os.environ.get("ARSI_UPLOAD_DIR", tempfile.gettempdir())) / "arsi_uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="DWG vs Excel Checker")
