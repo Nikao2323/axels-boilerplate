@@ -12,7 +12,6 @@ export function Hero() {
       initial="hidden"
       animate="visible"
     >
-      {/* Badge */}
       <motion.div
         className="mb-6 flex shrink-0 items-center gap-2 rounded-full px-3 py-2 whitespace-nowrap sm:mb-8 sm:px-4"
         style={{
@@ -28,11 +27,10 @@ export function Hero() {
             color: "rgba(0, 0, 0, 0.8)",
           }}
         >
-          For [your target audience]
+          სამშენებლო კომპანია
         </span>
       </motion.div>
 
-      {/* Main Heading */}
       <motion.h1
         className="mb-4 text-center text-4xl sm:mb-6 sm:text-7xl md:text-[84px]"
         style={{
@@ -44,12 +42,11 @@ export function Hero() {
         }}
         variants={staggerItem}
       >
-        Your big headline.
+        ვაშენებთ. ვავითარებთ.
         <br />
-        Your value prop.
+        ვქმნით.
       </motion.h1>
 
-      {/* Subheading */}
       <motion.h2
         className="mb-6 text-center text-lg leading-relaxed font-medium sm:mb-8 sm:text-2xl sm:whitespace-nowrap md:text-[28px]"
         style={{
@@ -58,12 +55,11 @@ export function Hero() {
         }}
         variants={staggerItem}
       >
-        One sentence that explains what your product does differently.
+        კომპანია არსი — ხარისხიანი მშენებლობა და განვითარება
       </motion.h2>
 
-      {/* CTA Button */}
       <motion.div className="mb-4" variants={staggerItem}>
-        <GradientButton href="#pricing" variant="dark" className="sm:px-36">
+        <GradientButton href="#contact" variant="dark" className="sm:px-36">
           <span
             className="text-sm font-semibold sm:text-base"
             style={{
@@ -71,12 +67,11 @@ export function Hero() {
               color: "rgba(255, 255, 255, 0.95)",
             }}
           >
-            Get Started — $XX
+            დაგვიკავშირდით
           </span>
         </GradientButton>
       </motion.div>
 
-      {/* Subtext */}
       <motion.p
         className="text-center text-sm font-semibold sm:text-base"
         style={{
@@ -85,7 +80,7 @@ export function Hero() {
         }}
         variants={staggerItem}
       >
-        Risk-free guarantee or pricing note.
+        უფასო კონსულტაცია პირველ შეხვედრაზე
       </motion.p>
     </motion.section>
   );
