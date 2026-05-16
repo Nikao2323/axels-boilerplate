@@ -11,19 +11,16 @@ import { CtaSection } from "@/components/cta-section";
 export default function Home() {
   return (
     <div className="relative min-h-screen">
-      {/* Gradient background */}
       <div
         className="fixed inset-0 z-0"
         style={{
           background:
-            "radial-gradient(ellipse at 30% 40%, #818cf8 0%, #a5b4fc 30%, #c7d2fe 60%, #e0e7ff 100%)",
+            "radial-gradient(ellipse at 30% 40%, #d4d4d4 0%, #e5e5e5 30%, #f0f0f0 60%, #fafafa 100%)",
         }}
       />
 
-      {/* Header */}
       <Header />
 
-      {/* Dark section - Hero */}
       <div className="relative z-10">
         <main className="relative">
           <Hero />
@@ -31,13 +28,12 @@ export default function Home() {
         </main>
       </div>
 
-      {/* Light sections */}
       <div className="relative z-10">
         <div id="features" className="bg-white">
           <SectionHeader
-            badge="Why people switch"
-            heading={["You do less.", "It does the rest."]}
-            description="Describe how your product eliminates painful steps that competitors make users do manually. Focus on the outcome, not the features."
+            badge="რატომ არსი"
+            heading={["ხარისხი.", "საიმედოობა."]}
+            description="ათეულობით წლის გამოცდილებით ვაშენებთ პროექტებს, რომლებიც დროს უძლებს."
           />
           <FeatureCarousel />
           <Comparison />
