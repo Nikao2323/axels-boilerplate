@@ -365,7 +365,7 @@ document.getElementById('upload-form').addEventListener('submit', async e => {
   fd.append('excel', document.getElementById('input-xl').files[0]);
 
   try {
-    const resp = await fetch('/compare', { method: 'POST', body: fd });
+    const resp = await fetch('compare', { method: 'POST', body: fd });
     clearInterval(stepTimer);
     if (!resp.ok) {
       const err = await resp.json();
